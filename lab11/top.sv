@@ -1,4 +1,3 @@
-// prettu version!
 
 // =======================================================
 //             TOP 
@@ -12,7 +11,7 @@ module top(
     logic [31:0] ReadData;
 
     // instantiate!
-    riscvmp RiscvMP(clk, reset, ReadData, DataAdr, WriteData, MemWrite);
+    riscvmulti RiscvMP(clk, reset, ReadData, DataAdr, WriteData, MemWrite);
     idmem    idmem(clk, MemWrite, DataAdr, WriteData, ReadData);
 
 endmodule
@@ -245,7 +244,7 @@ module datapath(
     // next PC logic
     assign PCNext = Result;
     flopenr #(32) pcreg(clk, reset, PCWrite, PCNext, PC);
-    mux2 pcadd4(PC, Result, AdrSrc, DataAdr);
+    mux2 #(32) pcadd4(PC, Result, AdrSrc, DataAdr);
 
     // old PC reg
     flopenr #(32) oldreg(clk, reset, IRWrite, PC, OldPC);
@@ -349,10 +348,10 @@ module mainfsm(
     output logic AdrSrc
 );
 
-    typedef enum logic [9:0] {S0,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10} statetype;
+    typedef enum logic [3:0] {S0,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10} statetype;
     statetype state, nextstate;
 
-    always_ff @(posedge clk, posedge reset)
+    always_ff @(posedge clk or posedge reset)
         if(reset) state <= S0;
         else      state <= nextstate;
 
@@ -363,17 +362,17 @@ module mainfsm(
         case(state)
             S0: nextstate = S1;
             S1: case(op)
-                    7'b0000011: nextstate = S2;
-                    7'b0100011: nextstate = S2;
-                    7'b0110011: nextstate = S6;
-                    7'b0010011: nextstate = S8;
-                    7'b1101111: nextstate = S9;
-                    7'b1100011: nextstate = S10;
-                    default: nextstate = S1;
+                    7'b0000011: nextstate = S2;  // lw
+                    7'b0100011: nextstate = S2;  // sw
+                    7'b0110011: nextstate = S6;  // R-type
+                    7'b0010011: nextstate = S8;  // I-type ALU
+                    7'b1101111: nextstate = S9;  // jal
+                    7'b1100011: nextstate = S10; // beq
+                    default: nextstate = S0;
                 endcase
             S2: case(op)
-                    7'b0000011: nextstate = S3;
-                    7'b0100011: nextstate = S5;
+                    7'b0000011: nextstate = S3;  // lw
+                    7'b0100011: nextstate = S5;  // sw
                     default: nextstate = S2;
                 endcase
             S3: nextstate = S4;
@@ -387,7 +386,7 @@ module mainfsm(
         endcase
     end
 
-    // 		output logic
+    // output logic
     always_comb begin
         IRWrite = 0; RegWrite = 0; MemWrite = 0;
         ALUSrcB = 2'b00; ALUSrcA = 2'b00;
@@ -463,10 +462,10 @@ endmodule
 
 
 // =======================================================
-//              ALU DECODER
+//              ALU DECODER - FIXED
 // =======================================================
 module aludecoder(
-    input logic opb5, // check 
+    input logic opb5, 
     input logic [2:0] funct3,
     input logic funct7b5,
     input logic [1:0] ALUOp,
@@ -479,10 +478,15 @@ module aludecoder(
             2'b01: ALUControl = 3'b001; // beq subtract
             2'b10: begin
                 case(funct3)
-                    3'b000: ALUControl = (funct7b5 ? 3'b001 : 3'b000); // sub/add
-                    3'b010: ALUControl = 3'b101; // slt
-                    3'b110: ALUControl = 3'b011; // or
-                    3'b111: ALUControl = 3'b010; // and
+                    3'b000: begin
+                        if (opb5 & funct7b5) // R-type sub
+                            ALUControl = 3'b001;
+                        else                 // R-type add or I-type addi
+                            ALUControl = 3'b000;
+                    end
+                    3'b010: ALUControl = 3'b101; // slt/slti
+                    3'b110: ALUControl = 3'b011; // or/ori
+                    3'b111: ALUControl = 3'b010; // and/andi
                     default: ALUControl = 3'b000;
                 endcase
             end
@@ -504,7 +508,7 @@ module instrdecoder(
 
     always_comb begin
         case(op)
-            7'b0010011: ImmSrc = 2'b00; // I-type
+            7'b0010011: ImmSrc = 2'b00; // I-type ALU
             7'b0000011: ImmSrc = 2'b00; // lw
             7'b0100011: ImmSrc = 2'b01; // sw
             7'b1100011: ImmSrc = 2'b10; // beq
@@ -514,4 +518,3 @@ module instrdecoder(
     end
 
 endmodule
-
