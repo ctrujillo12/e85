@@ -1,4 +1,3 @@
-
 // =======================================================
 //             TOP 
 // =======================================================
@@ -30,8 +29,8 @@ module riscvmulti(
 
     // control signals
     logic       ALUSrc, RegWrite, AdrSrc, PCWrite, IRWrite;
-    logic [1:0] ResultSrc, ImmSrc, ALUSrcA, ALUSrcB;
-    logic [2:0] ALUControl;
+    logic [1:0] ResultSrc, ALUSrcA, ALUSrcB;
+    logic [2:0] ALUControl, ImmSrc; // ****
     logic [31:0] Instr; // instr read from memory
     logic Zero;
 
@@ -145,16 +144,19 @@ endmodule
 // imm extension
 module extend(
     input  logic [31:7] instr,
-    input  logic [1:0]  immsrc,
+    input  logic [2:0]  immsrc, // ****
     output logic [31:0] immext
 );
 
     always_comb
         case(immsrc)
-            2'b00: immext = {{20{instr[31]}}, instr[31:20]};               // I-type
-            2'b01: immext = {{20{instr[31]}}, instr[31:25], instr[11:7]}; // S-type
-            2'b10: immext = {{20{instr[31]}}, instr[7], instr[30:25], instr[11:8], 1'b0}; // B-type
-            2'b11: immext = {{12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0}; // J-type
+            3'b000: immext = {{20{instr[31]}}, instr[31:20]};               // I-type
+            3'b001: immext = {{20{instr[31]}}, instr[31:25], instr[11:7]}; // S-type
+            3'b010: immext = {{20{instr[31]}}, instr[7], instr[30:25], instr[11:8], 1'b0}; // B-type
+            3'b011: immext = {{12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0}; // J-type
+				
+	3'b100: immext = {{instr[31:12]}, 12'b0};// U-type // ****
+				
             default: immext = 32'bx; // just in case
         endcase
 
@@ -222,7 +224,7 @@ module datapath(
     input  logic [1:0]  ALUSrcA, ALUSrcB,
     input  logic        AdrSrc,
     input  logic        RegWrite,
-    input  logic [1:0]  ImmSrc,
+    input  logic [2:0]  ImmSrc, // ****
     input  logic [2:0]  ALUControl,
     output logic        Zero,
     output logic [31:0] Instr,
@@ -302,7 +304,7 @@ module controller(
     input logic [2:0] funct3,
     input logic funct7b5, 
     input logic Zero, 
-    output logic [1:0] Immsrc, 
+    output logic [2:0] Immsrc, // ****
     output logic [1:0] ALUSrcA, ALUSrcB, 
     output logic [1:0] ResultSrc, 
     output logic AdrSrc, 
@@ -348,7 +350,7 @@ module mainfsm(
     output logic AdrSrc
 );
 
-    typedef enum logic [3:0] {S0,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10} statetype;
+    typedef enum logic [3:0] {S0,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10, S11} statetype;
     statetype state, nextstate;
 
     always_ff @(posedge clk or posedge reset)
@@ -368,6 +370,7 @@ module mainfsm(
                     7'b0010011: nextstate = S8;  // I-type ALU
                     7'b1101111: nextstate = S9;  // jal
                     7'b1100011: nextstate = S10; // beq
+	        7'b0010111: nextstate = S11; // auipc  *****
                     default: nextstate = S0;
                 endcase
             S2: case(op)
@@ -383,6 +386,7 @@ module mainfsm(
             S8: nextstate = S7;
             S9: nextstate = S7;
             S10: nextstate = S0;
+	S11: nextstate = S0;
         endcase
     end
 
@@ -454,6 +458,13 @@ module mainfsm(
                 ResultSrc = 2'b00;
                 Branch = 1;
             end
+	S11: begin   // auipc *******
+	     ALUSrcA   = 2'b01;  // OldPC
+	     ALUSrcB   = 2'b01;  // ImmExt
+	     ALUOp     = 2'b00;  // add
+	     ResultSrc = 2'b00;  // ALUOut
+	     RegWrite  = 1;      
+	end
         endcase
     end
 
@@ -462,7 +473,7 @@ endmodule
 
 
 // =======================================================
-//              ALU DECODER - FIXED
+//              ALU DECODER 
 // =======================================================
 module aludecoder(
     input logic opb5, 
@@ -503,18 +514,21 @@ endmodule
 // =======================================================
 module instrdecoder(
     input logic [6:0] op,
-    output logic [1:0] ImmSrc
+    output logic [2:0] ImmSrc   // ****
 );
 
     always_comb begin
         case(op)
-            7'b0010011: ImmSrc = 2'b00; // I-type ALU
-            7'b0000011: ImmSrc = 2'b00; // lw
-            7'b0100011: ImmSrc = 2'b01; // sw
-            7'b1100011: ImmSrc = 2'b10; // beq
-            7'b1101111: ImmSrc = 2'b11; // jal
-            default:     ImmSrc = 2'b00; // R-type
+            7'b0010011: ImmSrc = 3'b000; // I-type ALU
+            7'b0000011: ImmSrc = 3'b000; // lw
+            7'b0100011: ImmSrc = 3'b001; // sw
+            7'b1100011: ImmSrc = 3'b010; // beq
+            7'b1101111: ImmSrc = 3'b011; // jal
+	7'b0010111: ImmSrc = 3'b100; // auipc   *****
+            default:     ImmSrc = 3'b000; // R-type
         endcase
     end
 
 endmodule
+
+
